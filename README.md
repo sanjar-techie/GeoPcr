@@ -1,2 +1,0 @@
-# GeoPcr
-Point Cloud Registration
