@@ -1,0 +1,13 @@
+.idea
+.vscode
+build
+output
+*.egg-info
+*.so
+**/__pycache__
+weights/*
+pretrained
+data/Kitti/downsampled
+data/ModelNet/*.pkl
+data/3DMatch/*
+
