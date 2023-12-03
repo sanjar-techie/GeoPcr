@@ -69,42 +69,6 @@ CUDA_VISIBLE_DEVICES=0 python eval.py --benchmark=3DMatch --method=lgr
 
 Replace `3DMatch` with `3DLoMatch` to evaluate on 3DLoMatch.
 
-## ModelNet
-
-### Data preparation
-
-Download the [data](https://shapenet.cs.stanford.edu/media/modelnet40_ply_hdf5_2048.zip) and run `data/ModelNet/split_data.py` to generate the data. The data should be organized as follows:
-
-```text
---data--ModelNet--modelnet_ply_hdf5_2048--...
-               |--train.pkl
-               |--val.pkl
-               |--test.pkl
-```
-
-### Training
-
-The code for ModelNet is in `experiments/geotransformer.modelnet.rpmnet.stage4.gse.k3.max.oacl.stage2.sinkhorn`. Use the following command for training.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python trainval.py
-```
-
-### Testing
-
-Use the following command for testing.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python test.py --test_iter=ITER
-```
-
-`ITER` is the iteration id.
-
-We also provide pretrained weights in `weights`, use the following command to test the pretrained weights.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python test.py --snapshot=../../weights/geotransformer-modelnet.pth.tar
-```
 
 ## Multi-GPU Training
 
