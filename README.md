@@ -70,8 +70,8 @@ CUDA_VISIBLE_DEVICES=0 python eval.py --benchmark=3DMatch --method=lgr
 Replace `3DMatch` with `3DLoMatch` to evaluate on 3DLoMatch.
 
 
-
 ## Acknowledgements
+
 
 - [D3Feat](https://github.com/XuyangBai/D3Feat.pytorch)
 - [PREDATOR](https://github.com/prs-eth/OverlapPredator)
@@ -79,3 +79,4 @@ Replace `3DMatch` with `3DLoMatch` to evaluate on 3DLoMatch.
 - [CoFiNet](https://github.com/haoyu94/Coarse-to-fine-correspondences)
 - [huggingface-transformer](https://github.com/huggingface/transformers)
 - [SuperGlue](https://github.com/magicleap/SuperGluePretrainedNetwork)
+
