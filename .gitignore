@@ -10,4 +10,5 @@ pretrained
 data/Kitti/downsampled
 data/ModelNet/*.pkl
 data/3DMatch/*
+__pycache__/**
 
