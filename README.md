@@ -69,47 +69,6 @@ CUDA_VISIBLE_DEVICES=0 python eval.py --benchmark=3DMatch --method=lgr
 
 Replace `3DMatch` with `3DLoMatch` to evaluate on 3DLoMatch.
 
-## Kitti odometry
-
-### Data preparation
-
-Download the data from the [Kitti official website](http://www.cvlibs.net/datasets/kitti/eval_odometry.php) into `data/Kitti` and run `data/Kitti/downsample_pcd.py` to generate the data. The data should be organized as follows:
-
-```text
---data--Kitti--metadata
-            |--sequences--00--velodyne--000000.bin
-            |              |         |--...
-            |              |...
-            |--downsampled--00--000000.npy
-                         |   |--...
-                         |--...
-```
-
-### Training
-
-The code for Kitti is in `experiments/geotransformer.kitti.stage5.gse.k3.max.oacl.stage2.sinkhorn`. Use the following command for training.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python trainval.py
-```
-
-### Testing
-
-Use the following command for testing.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 ./eval.sh EPOCH
-```
-
-`EPOCH` is the epoch id.
-
-We also provide pretrained weights in `weights`, use the following command to test the pretrained weights.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python test.py --snapshot=../../weights/geotransformer-kitti.pth.tar
-CUDA_VISIBLE_DEVICES=0 python eval.py --method=lgr
-```
-
 ## ModelNet
 
 ### Data preparation
