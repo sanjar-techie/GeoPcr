@@ -72,14 +72,14 @@ class PEConditionalTransformer(nn.Module):
 
 class RPEConditionalTransformer(nn.Module):
     def __init__(
-        self,
-        blocks,
-        d_model,
-        num_heads,
-        dropout=None,
-        activation_fn='ReLU',
-        return_attention_scores=False,
-        parallel=False,
+            self,
+            blocks,
+            d_model,
+            num_heads,
+            dropout=None,
+            activation_fn='ReLU',
+            return_attention_scores=False,
+            parallel=False,
     ):
         super(RPEConditionalTransformer, self).__init__()
         self.blocks = blocks
@@ -94,10 +94,13 @@ class RPEConditionalTransformer(nn.Module):
         self.return_attention_scores = return_attention_scores
         self.parallel = parallel
 
-    def forward(self, feats0, feats1, embeddings0, embeddings1, masks0=None, masks1=None):
+    def forward(self, feats0, feats1, embeddings0, embeddings1, ref_overlapped_points_c_idx,
+                src_overlapped_points_c_idx,
+                ref_no_overlapped_points_c_idx, src_no_overlapped_points_c_idx, masks0=None, masks1=None):
         attention_scores = []
         for i, block in enumerate(self.blocks):
             if block == 'self':
+
                 feats0, scores0 = self.layers[i](feats0, feats0, embeddings0, memory_masks=masks0)
                 feats1, scores1 = self.layers[i](feats1, feats1, embeddings1, memory_masks=masks1)
             else:
@@ -107,8 +110,19 @@ class RPEConditionalTransformer(nn.Module):
                     feats0 = new_feats0
                     feats1 = new_feats1
                 else:
-                    feats0, scores0 = self.layers[i](feats0, feats1, memory_masks=masks1)
-                    feats1, scores1 = self.layers[i](feats1, feats0, memory_masks=masks0)
+                    anchor_feats0 = feats0[0, ref_overlapped_points_c_idx, :].unsqueeze(0)
+                    anchor_feats1 = feats1[0, src_overlapped_points_c_idx, :].unsqueeze(0)
+                    if ref_no_overlapped_points_c_idx.shape[0] > 0 and src_no_overlapped_points_c_idx.shape[0] > 0:
+                        nooverlap_feats0 = feats0[0, ref_no_overlapped_points_c_idx, :].unsqueeze(0)
+                        nooverlap_feats1 = feats1[0, src_no_overlapped_points_c_idx, :].unsqueeze(0)
+                        feats0[0, ref_no_overlapped_points_c_idx, :], _ = self.layers[i](nooverlap_feats0,
+                                                                                         anchor_feats0,
+                                                                                         memory_masks=masks1)
+                        feats1[0, src_no_overlapped_points_c_idx, :], _ = self.layers[i](nooverlap_feats1,
+                                                                                         anchor_feats1,
+                                                                                         memory_masks=masks1)
+                    feats0, scores0 = self.layers[i](feats0, feats1, memory_masks=masks1)  ###up
+                    feats1, scores1 = self.layers[i](feats1, feats0, memory_masks=masks0)  ###up
             if self.return_attention_scores:
                 attention_scores.append([scores0, scores1])
         if self.return_attention_scores:
@@ -119,14 +133,14 @@ class RPEConditionalTransformer(nn.Module):
 
 class LRPEConditionalTransformer(nn.Module):
     def __init__(
-        self,
-        blocks,
-        d_model,
-        num_heads,
-        num_embeddings,
-        dropout=None,
-        activation_fn='ReLU',
-        return_attention_scores=False,
+            self,
+            blocks,
+            d_model,
+            num_heads,
+            num_embeddings,
+            dropout=None,
+            activation_fn='ReLU',
+            return_attention_scores=False,
     ):
         super(LRPEConditionalTransformer, self).__init__()
         self.blocks = blocks

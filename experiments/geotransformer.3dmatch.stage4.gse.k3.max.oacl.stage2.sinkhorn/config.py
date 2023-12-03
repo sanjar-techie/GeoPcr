@@ -133,6 +133,17 @@ _C.coarse_loss.negative_optimal = 1.4
 _C.coarse_loss.log_scale = 24
 _C.coarse_loss.positive_overlap = 0.1
 
+_C.train.image_path= '3dmatch_image'
+_C.train.geo_train_prior= 'train_prior'
+_C.train.geo_prior= 'geo_prior_testval'
+_C.test.using_iter_prior = True
+_C.train.prior_min_points = 100
+_C.train.overlap_min_points = 50
+_C.train.superglue_prior=  ''
+_C.train.using_geo_prior=False
+_C.train.using_2d_prior=True
+_C.train.superglue_window_size=5
+
 # loss - Fine level
 _C.fine_loss = edict()
 _C.fine_loss.positive_radius = 0.05

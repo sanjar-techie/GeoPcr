@@ -156,8 +156,11 @@ class EpochBasedTrainer(BaseTrainer):
                 max_iteration=total_iterations,
                 timer=timer,
             )
+            summary_dict = summary_board.summary()
+            self.write_event('val-iter', summary_dict, iteration*self.epoch+iteration)
             pbar.set_description(message)
             torch.cuda.empty_cache()
+
         self.after_val_epoch(self.epoch)
         summary_dict = summary_board.summary()
         message = '[Val] ' + get_log_string(summary_dict, epoch=self.epoch, timer=timer)

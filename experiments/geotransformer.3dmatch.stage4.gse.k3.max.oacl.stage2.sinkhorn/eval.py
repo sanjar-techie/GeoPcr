@@ -33,7 +33,8 @@ def make_parser():
     parser.add_argument('--test_epoch', default=None, type=int, help='test epoch')
     parser.add_argument('--benchmark', choices=['3DMatch', '3DLoMatch'], required=True, help='test benchmark')
     parser.add_argument('--method', choices=['lgr', 'ransac', 'svd'], required=True, help='registration method')
-    parser.add_argument('--num_corr', type=int, default=None, help='number of correspondences for registration')
+    parser.add_argument('--num_corr', type=int, default=20000, help='number of correspondences for registration')
+    parser.add_argument('--iteration', type=int, default=0, help='number of iteration')
     parser.add_argument('--verbose', action='store_true', help='verbose mode')
     return parser
 
@@ -108,7 +109,8 @@ def eval_one_epoch(args, cfg, logger):
             ref_frame, src_frame = [int(x) for x in osp.basename(file_name).split('.')[0].split('_')]
 
             data_dict = np.load(file_name)
-
+            # print(file_name)
+            # print(list(data_dict.keys()))
             ref_points_c = data_dict['ref_points_c']
             src_points_c = data_dict['src_points_c']
             ref_node_corr_indices = data_dict['ref_node_corr_indices']
@@ -122,7 +124,7 @@ def eval_one_epoch(args, cfg, logger):
             transform = data_dict['transform']
             pcd_overlap = data_dict['overlap']
 
-            if args.num_corr is not None and corr_scores.shape[0] > engine.args.num_corr:
+            if args.num_corr is not None:# and corr_scores.shape[0] > engine.args.num_corr:
                 sel_indices = np.argsort(-corr_scores)[: args.num_corr]
                 ref_corr_points = ref_corr_points[sel_indices]
                 src_corr_points = src_corr_points[sel_indices]
@@ -310,6 +312,7 @@ def eval_one_epoch(args, cfg, logger):
     message += ', PMR>=0.3: {:.3f}'.format(coarse_matching_meter.mean('PMR>=0.3'))
     message += ', PMR>=0.5: {:.3f}'.format(coarse_matching_meter.mean('PMR>=0.5'))
     logger.critical(message)
+    logger.info(message)
     for scene_abbr, result_dict in scene_coarse_matching_result_dict.items():
         message = '    {}'.format(scene_abbr)
         message += ', PIR: {:.3f}'.format(result_dict['precision'])
@@ -325,6 +328,7 @@ def eval_one_epoch(args, cfg, logger):
     message += ', OV: {:.3f}'.format(fine_matching_meter.mean('overlap'))
     message += ', std: {:.3f}'.format(fine_matching_meter.std('recall'))
     logger.critical(message)
+    logger.info(message)
     for scene_abbr, result_dict in scene_fine_matching_result_dict.items():
         message = '    {}'.format(scene_abbr)
         message += ', FMR: {:.3f}'.format(result_dict['recall'])
@@ -339,6 +343,9 @@ def eval_one_epoch(args, cfg, logger):
     message += ', median_RRE: {:.3f}'.format(registration_meter.mean('median_rre'))
     message += ', median_RTE: {:.3f}'.format(registration_meter.mean('median_rte'))
     logger.critical(message)
+    logger.info(message)
+    print(message)
+
     for scene_abbr, result_dict in scene_registration_result_dict.items():
         message = '    {}'.format(scene_abbr)
         message += ', RR: {:.3f}'.format(result_dict['recall'])
@@ -346,15 +353,21 @@ def eval_one_epoch(args, cfg, logger):
         message += ', mean_RTE: {:.3f}'.format(result_dict['mean_rte'])
         message += ', median_RRE: {:.3f}'.format(result_dict['median_rre'])
         message += ', median_RTE: {:.3f}'.format(result_dict['median_rte'])
-        logger.critical(message)
-
+        # logger.critical(message)
+        print(message)
+        logger.info(message)
+    return registration_meter.mean('recall')
 
 def main():
+    import os
     parser = make_parser()
     args = parser.parse_args()
 
     cfg = make_cfg()
-    log_file = osp.join(cfg.log_dir, 'eval-{}.log'.format(time.strftime('%Y%m%d-%H%M%S')))
+    # log_file = osp.join(cfg.log_dir, 'eval-{}.log'.format(time.strftime('%Y%m%d-%H%M%S')))
+    cur_time=time.strftime('%Y%m%d-%H%M%S')
+    log_file = osp.join(cfg.log_dir, '{}_iteration_{}_{}_numcorr_{}_eval_epoch-{}_-{}.log'.format(args.benchmark,args.iteration,args.method,args.num_corr,args.test_epoch,cur_time))
+
     logger = Logger(log_file=log_file)
 
     message = 'Command executed: ' + ' '.join(sys.argv)
@@ -362,7 +375,20 @@ def main():
     message = 'Configs:\n' + json.dumps(cfg, indent=4)
     logger.info(message)
 
-    eval_one_epoch(args, cfg, logger)
+    recall = eval_one_epoch(args, cfg, logger)
+    log_file_replace = osp.join(cfg.log_dir, 'o3d10_{}_iteration_{}_{}_numcorr_{}_eval_epoch-{}_recall_{}-time-{}.log'.format(args.benchmark,args.iteration,args.method,args.num_corr,args.test_epoch,f'{recall:.3f}',cur_time))
+
+    os.system(
+        f'mv  {log_file} '
+        f'{log_file_replace }')
+    # if args.benchmark == "3DMatch":
+    #     os.system('mv ../../output/geotransformer.3dmatch.stage4.gse.k3.max.oacl.stage2.sinkhorn/registration/3DMatch '
+    #               f'../../output/geotransformer.3dmatch.stage4.gse.k3.max.oacl.stage2.sinkhorn/registration/3DMatch_{args.iteration,}-iter_{recall:.3f}_{cur_time}')
+    # else:
+    #     os.system(
+    #         'mv  ../../output/geotransformer.3dmatch.stage4.gse.k3.max.oacl.stage2.sinkhorn/registration/3DLoMatch '
+    #         f'../../output/geotransformer.3dmatch.stage4.gse.k3.max.oacl.stage2.sinkhorn/registration/3DLoMatch_{args.iteration}-iter_{recall:.3f}_{cur_time}')
+
 
 
 if __name__ == '__main__':

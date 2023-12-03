@@ -4,7 +4,41 @@ import torch.nn as nn
 
 from geotransformer.modules.ops import pairwise_distance
 from geotransformer.modules.transformer import SinusoidalPositionalEmbedding, RPEConditionalTransformer
+@torch.no_grad()
+def get_plane_embedding_indices( points,sigma_d=0.2,factor_a=3.8197186342054885):
+    r"""Compute the indices of pair-wise distance embedding and triplet-wise angular embedding.
 
+    Args:
+        points: torch.Tensor (B, N, 3), input point cloud
+
+    Returns:
+        d_indices: torch.FloatTensor (B, N, N), distance embedding indices
+        a_indices: torch.FloatTensor (B, N, N, k), angular embedding indices
+    """
+    batch_size, num_point, _ = points.shape
+
+    dist_map = torch.sqrt(pairwise_distance(points, points))  # (B, N, N)
+    d_indices = dist_map /sigma_d
+
+    k = 2
+    knn_indices = dist_map.topk(k=k + 1, dim=2, largest=False)[1][:, :, 1:]  # (B, N, k)
+    knn_indices = knn_indices.unsqueeze(3).expand(batch_size, num_point, k, 3)  # (B, N, k, 3)
+    expanded_points = points.unsqueeze(1).expand(batch_size, num_point, num_point, 3)  # (B, N, N, 3)
+    knn_points = torch.gather(expanded_points, dim=2, index=knn_indices)  # (B, N, k, 3)
+    ref_vectors = knn_points - points.unsqueeze(2)  # (B, N, k, 3)
+    ref_vector1=ref_vectors[0,:,0,:]
+    ref_vector2=ref_vectors[0,:,1,:]
+
+    ref_cross=torch.cross(ref_vector1,ref_vector2).expand(batch_size, num_point, num_point, 3).unsqueeze(3)
+    anc_vectors = points.unsqueeze(1) - points.unsqueeze(2)  # (B, N, N, 3)
+    # ref_vectors = ref_vectors.unsqueeze(2).expand(batch_size, num_point, num_point, k, 3)  # (B, N, N, k, 3)
+    anc_vectors = anc_vectors.unsqueeze(3).expand(batch_size, num_point, num_point, 1, 3)  # (B, N, N, k, 3)
+    sin_values = torch.linalg.norm(torch.cross(ref_cross, anc_vectors, dim=-1), dim=-1)  # (B, N, N, k)
+    cos_values = torch.sum(ref_cross * anc_vectors, dim=-1)  # (B, N, N, k)
+    angles = torch.atan2(sin_values, cos_values)  # (B, N, N, k)
+    a_indices_2 = angles * factor_a
+
+    return d_indices, a_indices_2
 
 class GeometricStructureEmbedding(nn.Module):
     def __init__(self, hidden_dim, sigma_d, sigma_a, angle_k, reduction_a='max'):
@@ -21,6 +55,8 @@ class GeometricStructureEmbedding(nn.Module):
         self.reduction_a = reduction_a
         if self.reduction_a not in ['max', 'mean']:
             raise ValueError(f'Unsupported reduction mode: {self.reduction_a}.')
+
+
 
     @torch.no_grad()
     def get_embedding_indices(self, points):
@@ -52,7 +88,9 @@ class GeometricStructureEmbedding(nn.Module):
         angles = torch.atan2(sin_values, cos_values)  # (B, N, N, k)
         a_indices = angles * self.factor_a
 
+
         return d_indices, a_indices
+
 
     def forward(self, points):
         d_indices, a_indices = self.get_embedding_indices(points)
@@ -68,8 +106,9 @@ class GeometricStructureEmbedding(nn.Module):
             a_embeddings = a_embeddings.mean(dim=3)
 
         embeddings = d_embeddings + a_embeddings
+        init_dist_angle = d_indices.unsqueeze(-1) * a_indices
 
-        return embeddings
+        return embeddings,init_dist_angle
 
 
 class GeometricTransformer(nn.Module):
@@ -117,8 +156,11 @@ class GeometricTransformer(nn.Module):
         src_points,
         ref_feats,
         src_feats,
+        ref_overlapped_points_c_idx,src_overlapped_points_c_idx,
+        ref_no_overlapped_points_c_idx,src_no_overlapped_points_c_idx,
         ref_masks=None,
         src_masks=None,
+
     ):
         r"""Geometric Transformer
 
@@ -134,8 +176,20 @@ class GeometricTransformer(nn.Module):
             ref_feats: torch.Tensor (B, N, C)
             src_feats: torch.Tensor (B, M, C)
         """
-        ref_embeddings = self.embedding(ref_points)
-        src_embeddings = self.embedding(src_points)
+        ref_embeddings,init_ref_embedding = self.embedding(ref_points)
+        src_embeddings ,init_src_embedding = self.embedding(src_points)
+        # ref_no_overlaped_embedding=ref_embeddings[0,ref_no_overlapped_points_c_idx,:,:]
+        # src_no_overlaped_embedding=src_embeddings[0,src_no_overlapped_points_c_idx,:,:]
+        #
+        # ref_overlaped_embedding=ref_no_overlaped_embedding[:,ref_overlapped_points_c_idx,:]
+        # src_overlaped_embedding=src_no_overlaped_embedding[:,src_overlapped_points_c_idx,:]
+        #
+        # ref_no_overlaped_feats=ref_feats[0,ref_no_overlapped_points_c_idx,:]
+        # src_no_overlaped_feats=src_feats[0,src_no_overlapped_points_c_idx,:]
+        #
+        # ref_overlaped_feats=ref_feats[0,ref_overlapped_points_c_idx,:]
+        # src_overlaped_feats=src_feats[0,src_overlapped_points_c_idx,:]
+
 
         ref_feats = self.in_proj(ref_feats)
         src_feats = self.in_proj(src_feats)
@@ -145,6 +199,8 @@ class GeometricTransformer(nn.Module):
             src_feats,
             ref_embeddings,
             src_embeddings,
+            ref_overlapped_points_c_idx,src_overlapped_points_c_idx,
+            ref_no_overlapped_points_c_idx,src_no_overlapped_points_c_idx,
             masks0=ref_masks,
             masks1=src_masks,
         )
@@ -152,4 +208,4 @@ class GeometricTransformer(nn.Module):
         ref_feats = self.out_proj(ref_feats)
         src_feats = self.out_proj(src_feats)
 
-        return ref_feats, src_feats
+        return ref_feats, src_feats, init_ref_embedding , init_src_embedding

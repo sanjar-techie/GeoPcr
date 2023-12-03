@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from IPython import embed
-
+import numpy as np
+from geotransformer.modules.ops import pairwise_distance
+from geotransformer.datasets.registration.threedmatch.dataset import get_correspondences
+import numpy as np
 from geotransformer.modules.ops import point_to_node_partition, index_select
 from geotransformer.modules.registration import get_node_correspondences
 from geotransformer.modules.sinkhorn import LearnableLogOptimalTransport
@@ -21,7 +24,9 @@ class GeoTransformer(nn.Module):
         super(GeoTransformer, self).__init__()
         self.num_points_in_patch = cfg.model.num_points_in_patch
         self.matching_radius = cfg.model.ground_truth_matching_radius
-
+        self.using_geo_prior=cfg.train.using_geo_prior
+        self.prior_min_points=cfg.train.prior_min_points
+        self.using_2d_prior=cfg.train.using_2d_prior
         self.backbone = KPConvFPN(
             cfg.backbone.input_dim,
             cfg.backbone.output_dim,
@@ -95,10 +100,10 @@ class GeoTransformer(nn.Module):
         output_dict['src_points'] = src_points
 
         # 1. Generate ground truth node correspondences
-        _, ref_node_masks, ref_node_knn_indices, ref_node_knn_masks = point_to_node_partition(
+        ref_point_to_node, ref_node_masks, ref_node_knn_indices, ref_node_knn_masks = point_to_node_partition(
             ref_points_f, ref_points_c, self.num_points_in_patch
         )
-        _, src_node_masks, src_node_knn_indices, src_node_knn_masks = point_to_node_partition(
+        src_point_to_node, src_node_masks, src_node_knn_indices, src_node_knn_masks = point_to_node_partition(
             src_points_f, src_points_c, self.num_points_in_patch
         )
 
@@ -123,6 +128,57 @@ class GeoTransformer(nn.Module):
         output_dict['gt_node_corr_indices'] = gt_node_corr_indices
         output_dict['gt_node_corr_overlaps'] = gt_node_corr_overlaps
 
+        ref_overlapped_points_c_idx = torch.tensor([], dtype=torch.int64)
+        src_overlapped_points_c_idx = torch.tensor([], dtype=torch.int64)
+
+        ref_no_overlapped_points_c_idx = torch.tensor([], dtype=torch.int64).to(data_dict['features'].device)
+        src_no_overlapped_points_c_idx = torch.tensor([], dtype=torch.int64).to(data_dict['features'].device)
+
+
+
+        if self.using_geo_prior:
+            estimated_transform = data_dict['estimated_transform'].detach()
+            # corr_indices = get_correspondences(ref_points.detach().cpu().numpy(), src_points.detach().cpu().numpy(), estimated_transform.detach().cpu().numpy(), 0.0375)
+            # est_src_idx =np.array (list(set(corr_indices[:,1].tolist())))
+            # est_tgt_idx =np.array( list(set(corr_indices[:,0].tolist())))
+            corr_indices_f = get_correspondences(ref_points_f.detach().cpu().numpy(), src_points_f.detach().cpu().numpy(), estimated_transform.detach().cpu().numpy(), 0.0375)
+            est_ref_idx_f =np.array( list(set(corr_indices_f[:,0].tolist())))
+            est_src_idx_f =np.array (list(set(corr_indices_f[:,1].tolist())))
+            # from geotransformer.utils.registration import compute_overlap
+            # origin_overlap=compute_overlap(src_points=src_points.detach().cpu().numpy(),ref_points=ref_points.detach().cpu().numpy(),transform=transform.detach().cpu().numpy())
+            # geo_est_overlap=compute_overlap(src_points=src_points[est_src_idx,:].detach().cpu().numpy(),ref_points=ref_points[est_tgt_idx,:].detach().cpu().numpy(),transform=estimated_transform_baseline.detach().cpu().numpy())
+
+            if est_src_idx_f.shape[0]<self.prior_min_points or est_ref_idx_f.shape[0]<self.prior_min_points:
+                if self.training:
+                    corr_indices_f = get_correspondences(ref_points_f.detach().cpu().numpy(), src_points_f.detach().cpu().numpy(), transform.detach().cpu().numpy(), 0.0375)
+                    est_ref_idx_f =np.array( list(set(corr_indices_f[:len(corr_indices_f)//2,0].tolist())))
+                    est_src_idx_f =np.array (list(set(corr_indices_f[:len(corr_indices_f)//2,1].tolist())))
+                elif 'ref_corr_indices' in data_dict.keys():
+                    ref_corr_indices =data_dict['ref_corr_indices'][:self.prior_min_points*10]
+                    src_corr_indices =data_dict['src_corr_indices'][:self.prior_min_points*10]
+                    ref_prior_corr_points=ref_points[ref_corr_indices,:]
+                    src_prior_corr_points=src_points[src_corr_indices,:]
+                    k = 0
+                    src_dist_map_f = torch.sqrt(pairwise_distance(src_prior_corr_points.unsqueeze(0), src_points_f.unsqueeze(0)))  # (B, N, N)
+                    est_src_idx_f = src_dist_map_f.topk(k=k + 1, dim=2, largest=False)[1][0, :, 0]  # (B, N, k)
+                    ref_dist_map_f = torch.sqrt(pairwise_distance(ref_prior_corr_points.unsqueeze(0), ref_points_f.unsqueeze(0)))  # (B, N, N)
+                    est_ref_idx_f = ref_dist_map_f.topk(k=k + 1, dim=2, largest=False)[1][0, :, 0]  # (B, N, k)
+                else:
+                    est_ref_idx_f =np.random.permutation(ref_points_f.shape[0])[: self.prior_min_points]
+                    est_src_idx_f =np.random.permutation(src_points_f.shape[0])[: self.prior_min_points]
+
+            # est_ref_idx_f,est_src_idx_f=torch.unique(est_ref_idx_f),torch.unique(est_src_idx_f)
+            # indices = np.random.permutation(src_points_c.shape[0])[: 50]
+            # points = points[indices]
+            ref_overlapped_points_c_idx=ref_point_to_node[est_ref_idx_f]
+            src_overlapped_points_c_idx=src_point_to_node[est_src_idx_f]
+            src_overlapped_points_c_idx,ref_overlapped_points_c_idx=torch.unique(src_overlapped_points_c_idx),torch.unique(ref_overlapped_points_c_idx)
+            src_points_c_idx=torch.arange(src_points_c.shape[0]).to(src_overlapped_points_c_idx.device)
+            ref_points_c_idx=torch.arange(ref_points_c.shape[0]).to(src_overlapped_points_c_idx.device)
+            src_no_overlapped_points_c_list=[i.item()  for i in src_points_c_idx if i not in src_overlapped_points_c_idx  ]
+            src_no_overlapped_points_c_idx=torch.from_numpy(np.array(src_no_overlapped_points_c_list))
+            ref_no_overlapped_points_c_list=[i.item()  for i in ref_points_c_idx if i not in ref_overlapped_points_c_idx  ]
+            ref_no_overlapped_points_c_idx=torch.from_numpy(np.array(ref_no_overlapped_points_c_list))
         # 2. KPFCNN Encoder
         feats_list = self.backbone(feats, data_dict)
 
@@ -132,11 +188,13 @@ class GeoTransformer(nn.Module):
         # 3. Conditional Transformer
         ref_feats_c = feats_c[:ref_length_c]
         src_feats_c = feats_c[ref_length_c:]
-        ref_feats_c, src_feats_c = self.transformer(
+        ref_feats_c, src_feats_c, ref_embeddings , src_embeddings = self.transformer(
             ref_points_c.unsqueeze(0),
             src_points_c.unsqueeze(0),
             ref_feats_c.unsqueeze(0),
             src_feats_c.unsqueeze(0),
+            ref_overlapped_points_c_idx,src_overlapped_points_c_idx,
+            ref_no_overlapped_points_c_idx,src_no_overlapped_points_c_idx
         )
         ref_feats_c_norm = F.normalize(ref_feats_c.squeeze(0), p=2, dim=1)
         src_feats_c_norm = F.normalize(src_feats_c.squeeze(0), p=2, dim=1)

@@ -5,8 +5,8 @@ tqdm
 coloredlogs
 easydict
 nibabel
-open3d==0.11.2
 scikit-learn
+open3d==0.11.2
 einops
 ipdb
 tensorboard
